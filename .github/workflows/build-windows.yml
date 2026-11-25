@@ -1,0 +1,72 @@
+# Prototype 001: smoke-tests the project and exports a Windows x64 build.
+# Download it from the run's "Artifacts" section (Actions tab).
+name: Build Windows x64
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  build-windows:
+    name: Smoke test + Windows export
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} and the Windows export template
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o "$RUNNER_TEMP/godot.zip" "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          mkdir -p "$HOME/bin"
+          mv "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" "$HOME/bin/godot"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          curl -fsSL -o "$RUNNER_TEMP/templates.tpz" "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          tpl="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$tpl"
+          unzip -q -j "$RUNNER_TEMP/templates.tpz" templates/windows_release_x86_64.exe templates/version.txt -d "$tpl"
+          rm -rf "$RUNNER_TEMP/godot.zip" "$RUNNER_TEMP/godot" "$RUNNER_TEMP/templates.tpz"
+
+      - name: Import project
+        run: godot --headless --import --path .
+
+      - name: Smoke test
+        run: |
+          set -o pipefail
+          godot --headless --path . --script res://tests/smoke_test.gd 2>&1 | tee "$RUNNER_TEMP/smoke.log"
+          if grep -qE "SCRIPT ERROR|Parse Error" "$RUNNER_TEMP/smoke.log"; then
+            echo "::error::Script errors during smoke test"
+            exit 1
+          fi
+
+      - name: Export Windows x64
+        run: |
+          set -euo pipefail
+          mkdir -p build/windows
+          godot --headless --path . --export-release "Windows Desktop" build/windows/InteractionSandbox.exe
+          test -s build/windows/InteractionSandbox.exe
+          cp README.md docs/ASSET_REPLACEMENT.md build/windows/
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: InteractionSandbox-windows-x64
+          path: build/windows/
+          if-no-files-found: error
+
+      - name: Upload source project
+        uses: actions/upload-artifact@v4
+        with:
+          name: InteractionSandbox-source
+          include-hidden-files: true
+          path: |
+            .
+            !.git
+            !.godot
+            !build

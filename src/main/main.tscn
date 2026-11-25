@@ -1,0 +1,123 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/main/sandbox_main.gd" id="1_main"]
+[ext_resource type="Script" path="res://src/sandbox_object/sandbox_object.gd" id="2_object"]
+[ext_resource type="Script" path="res://src/sandbox_object/attachment_point_config.gd" id="3_point"]
+[ext_resource type="Mesh" path="res://assets/meshes/template_object_a_mesh.tres" id="4_mesh_a"]
+[ext_resource type="Mesh" path="res://assets/meshes/template_object_b_mesh.tres" id="5_mesh_b"]
+[ext_resource type="Material" path="res://assets/materials/template_object_a_material.tres" id="6_mat_a"]
+[ext_resource type="Material" path="res://assets/materials/template_object_b_material.tres" id="7_mat_b"]
+[ext_resource type="Resource" path="res://assets/animations/template_object_a_animation.tres" id="8_anim_a"]
+[ext_resource type="Resource" path="res://assets/animations/template_object_b_animation.tres" id="9_anim_b"]
+[ext_resource type="Material" path="res://assets/materials/template_floor_material.tres" id="10_floor"]
+[ext_resource type="Script" path="res://src/camera/orbit_camera.gd" id="11_camera"]
+[ext_resource type="Script" path="res://src/interaction/object_manipulator.gd" id="12_manipulator"]
+[ext_resource type="Script" path="res://src/debug/debug_panel.gd" id="13_panel"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.5, 0.54, 0.58, 1)
+sky_horizon_color = Color(0.7, 0.71, 0.72, 1)
+ground_bottom_color = Color(0.28, 0.28, 0.29, 1)
+ground_horizon_color = Color(0.7, 0.71, 0.72, 1)
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+ambient_light_source = 3
+reflected_light_source = 2
+tonemap_mode = 2
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_floor"]
+size = Vector2(40, 40)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(40, 0.2, 40)
+
+[sub_resource type="Resource" id="Point_a_hand_r"]
+script = ExtResource("3_point")
+point_name = &"hand_r"
+position = Vector3(0.45, 1, 0)
+
+[sub_resource type="Resource" id="Point_a_hand_l"]
+script = ExtResource("3_point")
+point_name = &"hand_l"
+position = Vector3(-0.45, 1, 0)
+
+[sub_resource type="Resource" id="Point_a_head"]
+script = ExtResource("3_point")
+point_name = &"head"
+position = Vector3(0, 1.8, 0)
+
+[sub_resource type="Resource" id="Point_a_back"]
+script = ExtResource("3_point")
+point_name = &"back"
+position = Vector3(0, 1.2, 0.36)
+
+[sub_resource type="Resource" id="Point_b_grip"]
+script = ExtResource("3_point")
+point_name = &"grip"
+position = Vector3(0, 0.25, 0)
+
+[sub_resource type="Resource" id="Point_b_top"]
+script = ExtResource("3_point")
+point_name = &"top"
+position = Vector3(0, 0.5, 0)
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.819152, 0, 0.573576, 0.439385, 0.642788, -0.627507, -0.368688, 0.766044, 0.526541, 0, 6, 0)
+shadow_enabled = true
+
+[node name="Floor" type="StaticBody3D" parent="."]
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("PlaneMesh_floor")
+surface_material_override/0 = ExtResource("10_floor")
+
+[node name="Shape" type="CollisionShape3D" parent="Floor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+shape = SubResource("BoxShape3D_floor")
+
+[node name="Objects" type="Node3D" parent="."]
+
+[node name="ObjectA" type="Node3D" parent="Objects" node_paths=PackedStringArray("interaction_target")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.2, 0, 0)
+script = ExtResource("2_object")
+display_name = "Object A"
+placeholder_mesh = ExtResource("4_mesh_a")
+material = ExtResource("6_mat_a")
+override_name = "object_a"
+animation = ExtResource("8_anim_a")
+interaction_target = NodePath("../ObjectB")
+attachment_points = Array[ExtResource("3_point")]([SubResource("Point_a_hand_r"), SubResource("Point_a_hand_l"), SubResource("Point_a_head"), SubResource("Point_a_back")])
+
+[node name="ObjectB" type="Node3D" parent="Objects"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0.6, 0)
+script = ExtResource("2_object")
+display_name = "Object B"
+placeholder_mesh = ExtResource("5_mesh_b")
+material = ExtResource("7_mat_b")
+override_name = "object_b"
+animation = ExtResource("9_anim_b")
+attachment_points = Array[ExtResource("3_point")]([SubResource("Point_b_grip"), SubResource("Point_b_top")])
+
+[node name="OrbitCamera" type="Camera3D" parent="."]
+fov = 50.0
+script = ExtResource("11_camera")
+
+[node name="ObjectManipulator" type="Node" parent="." node_paths=PackedStringArray("camera")]
+script = ExtResource("12_manipulator")
+camera = NodePath("../OrbitCamera")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="DebugPanel" type="PanelContainer" parent="UI"]
+script = ExtResource("13_panel")

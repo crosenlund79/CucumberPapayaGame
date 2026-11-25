@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ProceduralAnimationConfig" format=3]
+
+[ext_resource type="Script" path="res://src/animation/procedural_animation_config.gd" id="1_cfg"]
+
+[resource]
+script = ExtResource("1_cfg")
+mode = 1
+speed = 0.5
+movement_range = 0.15
+axis = Vector3(0, 1, 0)
+loop = true
+cycles_when_not_looping = 1
+phase_offset = 0.0
+autoplay = true
