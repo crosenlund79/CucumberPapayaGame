@@ -1,9 +1,10 @@
-# Prototype 001: smoke-tests the project and exports a Windows x64 build.
-# Download it from the run's "Artifacts" section (Actions tab).
+# Prototype 001 (2D): smoke-tests the project and exports a Windows x64 build.
+# Download the ZIP from the run's "Artifacts" section (Actions tab).
 name: Build Windows x64
 
 on:
   push:
+    branches: [main, "claude/**"]
   workflow_dispatch:
 
 env:
@@ -48,22 +49,24 @@ jobs:
       - name: Export Windows x64
         run: |
           set -euo pipefail
-          mkdir -p build/windows
-          godot --headless --path . --export-release "Windows Desktop" build/windows/InteractionSandbox.exe
-          test -s build/windows/InteractionSandbox.exe
-          cp README.md docs/ASSET_REPLACEMENT.md build/windows/
+          out=build/InteractionSandbox2D
+          mkdir -p "$out/custom/graphics"
+          godot --headless --path . --export-release "Windows Desktop" "$out/InteractionSandbox2D.exe"
+          test -s "$out/InteractionSandbox2D.exe"
+          cp docs/CUSTOM_ARTWORK.md README.md "$out/"
+          printf 'Put replacement PNG files here, e.g. object_a_head.png.\nSee CUSTOM_ARTWORK.md. Restart the game to load changes.\n' > "$out/custom/graphics/PUT_PNG_FILES_HERE.txt"
 
-      - name: Upload Windows build
+      - name: Upload Windows build (ZIP)
         uses: actions/upload-artifact@v4
         with:
-          name: InteractionSandbox-windows-x64
-          path: build/windows/
+          name: InteractionSandbox2D-windows-x64
+          path: build/InteractionSandbox2D/
           if-no-files-found: error
 
-      - name: Upload source project
+      - name: Upload source project (ZIP)
         uses: actions/upload-artifact@v4
         with:
-          name: InteractionSandbox-source
+          name: InteractionSandbox2D-source
           include-hidden-files: true
           path: |
             .

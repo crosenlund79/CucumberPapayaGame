@@ -4,11 +4,7 @@
 
 [resource]
 script = ExtResource("1_cfg")
-mode = 8
-speed = 0.35
-movement_range = 1.75
-axis = Vector3(1, 0, 0)
-loop = true
-cycles_when_not_looping = 1
-phase_offset = 0.0
-autoplay = true
+mode = 9
+speed = 0.3
+movement_range = 300.0
+axis = Vector2(1, 0)

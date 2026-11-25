@@ -1,37 +1,76 @@
-# Godot / Claude Starter Pack — v1.2
+# 2D Interaction Sandbox — Prototype 001
 
-Reusable **development instructions and design conventions** for future Godot 4 projects; this is **not a game, a functioning asset loader, or an implemented test framework**. We improve this pack with the user, ChatGPT and Claude before promoting a reviewed version to `main`.
+A rapid feasibility prototype in **Godot 4.7 (GL Compatibility)**. It is a technical playground, not a game, for trying out 2D interactions, positioning, sprite layering, pivots, attachment and procedural animation, using replaceable hand-drawn PNG artwork.
 
-## Contents
+## Get it
 
-| File | Responsibility |
+- **Windows x64:** GitHub → *Actions* → **Build Windows x64** → latest green run → *Artifacts* → `InteractionSandbox2D-windows-x64` (ZIP). Unzip it and run `InteractionSandbox2D.exe`. The exe is unsigned, so Windows may show SmartScreen: choose *More info → Run anyway*.
+- **Source:** open `project.godot` in Godot 4.7.x (standard build) and press F5. The `InteractionSandbox2D-source` artifact is the same project as a ZIP.
+- **Your own artwork:** see [docs/CUSTOM_ARTWORK.md](docs/CUSTOM_ARTWORK.md).
+
+## Controls
+
+| Input | Action |
 | --- | --- |
-| `CLAUDE.md` | Claude's entry point, preflight and work modes |
-| `docs/GODOT_CLAUDE_GUIDELINES.md` | Single authority for engineering, source control, scope and delivery rules |
-| `docs/DESIGN_WORKFLOW.md` | User / ChatGPT / Claude decision and handoff process |
-| `docs/PROJECT_BRIEF.md` | Single record for each game's design and approved current objective |
-| `docs/BACKLOG.md` | Deferred observations, never implicit authorization |
-| `assets/README.md` | Runtime art/audio override contract (`template_` fallbacks) |
-| `custom/` | User-owned override folder (`graphics/`, `audio/`); `.gdignore` keeps Godot from importing/packing it |
-| `tests/README.md` | Module, integration, manual and environment test expectations |
-| `.gitignore` | Editor-generated, local and binary artifacts ignored by default |
+| LMB click / drag | Select (transparent pixels ignored) / move · rotate · scale |
+| Shift / Ctrl while dragging | Axis lock (move), stretch Y (scale) / snap |
+| MMB or RMB drag, wheel | Pan, zoom at cursor |
+| W E R | Tool: move / rotate / scale |
+| Tab, Esc | Select next, deselect (or leave path drawing) |
+| `[` `]` | Draw order back / forward |
+| H, T | Flip horizontally, reset transform |
+| P, Space, Backspace | Play/pause selected, play/pause all, reset all animations |
+| F, Home, F1 | Focus selected, reset camera, hide panel |
 
-## Pilot this master pack
+The **debug panel** edits the selection live: transform and draw order; per-layer offset, pivot, rotation, scale, z and visibility; animation of the whole object or of one layer (mode, speed, range, phase, loop, play/pause/reset, path drawing); attachment; global speed and overlays. Panel changes are not saved.
 
-1. Review the rules and check for gaps or needless complexity with Claude Code in **review-only mode**.
-2. Approve changes explicitly. Keep review edits on a working branch, then inspect and merge to `main` only after approval.
-3. When stable, optionally mark `_StarterGodotPack` as a **GitHub template repository**.
-4. For a new project, choose **Use this template**, then complete `docs/PROJECT_BRIEF.md` and hold a design review **before any game code**.
+## What's in the scene
 
-### Starter review prompt
+- **Object A**, a character made of four layers (`body`, `head`, `arm_back`, `arm_front`). The arms sway around their shoulder pivots and the whole object *approaches* Object B. Attachment points: `hand`, `hand_back` (they follow the arms), `head_top`, `back`.
+- **Object B**, a prop made of two layers (`crate`, plus a spinning `emblem`). It follows a closed *path*. Attachment points: `grip`, `top`.
 
-> This is the `_StarterGodotPack` reusable template, not a game. Read `CLAUDE.md` and all referenced guidance. Review for contradictory rules, real Godot 4 pitfalls, unnecessary complexity and scope creep. Propose minimal improvements with trade-offs. Do not edit files, create branches, generate game code or export a build without my explicit approval.
+Try this: select B → *Attachment* → own point `grip`, attach to `Object A / hand`. To draw a new path: select an object → *Animation* → *Draw path* → click points in the world.
 
-## Reuse in a game repository
+## Configure without code (Inspector)
 
-- **Replace this README with the game's README.** Preserve `CLAUDE.md`, the rules and relevant conventions; fill out `docs/PROJECT_BRIEF.md` only with user-confirmed decisions.
-- `src/<module>/`, automated tests and the minimal asset resolver are introduced when an approved game objective needs them—not prebuilt speculatively in this template.
-- The runtime override behavior (Windows/Linux, effective after restarting the game) is required in games that use replaceable assets. This documentation **does not itself implement that loader**; the first relevant implementation must test it.
-- Template updates do **not** automatically flow into existing games. Review changes case by case.
+In `src/main/main.tscn`, select `Objects/ObjectA` or `ObjectB`:
 
-**Operating principle:** Build what's needed. Test it. Preserve what works. Report what was discovered. Then stop.
+- **Layers** (`SpriteLayerConfig`): `art_name`, `position`, `pivot`, `rotation_degrees`, `scale`, `z_index`, `modulate`, `visible`, `collides`, and an optional per-layer `animation`.
+- **Animation** (`.tres` in `assets/animations/`): `mode` (Bob, Sway, Spin, Orbit, Pulse, Squash, Hop, Waddle, Approach, Path), `speed`, `movement_range`, `axis`, `loop`, `cycles_when_not_looping`, `phase_offset`, `autoplay`, `path_points`, `path_closed`, `path_orient`.
+- **Attachment points**: `point_name`, `position`, `rotation_degrees`, `layer` (follow a layer).
+- **Collision**: `collision_padding`, `pick_alpha_threshold`.
+- **Add a third object:** duplicate `ObjectB` under `Objects`.
+
+## Layout
+
+| Path | Responsibility |
+| --- | --- |
+| `src/art/` | `ArtResolver`: PNG lookup (`custom/` → `template_`), JSON pivot sidecar |
+| `src/sandbox_object/` | Layered object, layer/attachment configs, collision, attach |
+| `src/animation/` | Procedural animator + config, path overlay |
+| `src/interaction/` | Mouse picking and manipulation, path drawing |
+| `src/camera/`, `src/world/`, `src/debug/`, `src/main/` | Pan/zoom camera, grid, debug panel, scene wiring |
+| `assets/graphics/`, `assets/animations/` | `template_` placeholder PNGs, animation presets |
+| `tests/smoke_test.gd` | Headless smoke test |
+| `.github/workflows/build-windows.yml` | Smoke test + Windows export → ZIP artifacts |
+
+Smoke test (Godot 4.7 on PATH, run from the project folder):
+
+```bash
+godot --headless --import
+```
+
+```bash
+godot --headless --script res://tests/smoke_test.gd
+```
+
+## Known limitations
+
+- Debug-panel edits are live only. To save settings, use the Inspector (editor), or the pivot JSON file for custom art.
+- Collision uses one rectangle per layer around its opaque pixels, not pixel-perfect shapes. Clicking *is* pixel-accurate.
+- Attachment-point and layer positions don't adapt automatically to replacement art with different proportions.
+- When Y-sort is on, clicking still resolves ties by scene order, not by Y.
+- PNG only. Audio overrides are not implemented. Art reloads after a restart (no hot reload).
+- Tested headless and with software rendering on Linux. The Windows exe is built by CI but not run on Windows by Claude.
+
+Project rules for Claude live in `CLAUDE.md` and `docs/`. The abandoned 3D attempt is archived at commit `7cd1017` on this branch.

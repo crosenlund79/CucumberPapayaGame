@@ -1,6 +1,8 @@
 # Replaceable graphics and audio — runtime override contract
 
-**Approved behavior: Option B.** Users must be able to replace Claude-created graphics/audio by dropping files into one documented folder, **including next to an exported Windows/Linux game, without rebuilding**. The game must keep working when an override is absent or invalid. This document defines the contract; the starter pack does not include a speculative Godot loader.
+**Approved behavior: Option B.** Users must be able to replace Claude-created graphics/audio by dropping files into one documented folder, **including next to an exported Windows/Linux game, without rebuilding**. The game must keep working when an override is absent or invalid. This document defines the contract.
+
+**Implemented (Prototype 001, 2D):** `src/art/art_resolver.gd` resolves PNG sprites by logical name (`custom/graphics/<name>.png` → `res://assets/graphics/template_<name>.png`). Templates are imported as *Keep File* so both use the same runtime `Image` loading path. An optional `custom/graphics/<name>.json` sidecar may set the image's `pivot`/`pivot_px` and pixel `scale`. Audio overrides are not implemented yet (no audio in use). User guide: `docs/CUSTOM_ARTWORK.md`.
 
 ## One override layout
 

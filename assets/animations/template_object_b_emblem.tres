@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="ProceduralAnimationConfig" format=3]
+
+[ext_resource type="Script" path="res://src/animation/procedural_animation_config.gd" id="1_cfg"]
+
+[resource]
+script = ExtResource("1_cfg")
+mode = 3
+speed = 0.2
+movement_range = 360.0

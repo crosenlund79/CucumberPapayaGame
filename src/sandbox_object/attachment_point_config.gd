@@ -2,27 +2,14 @@
 class_name AttachmentPointConfig
 extends Resource
 ## One named attachment point on a [SandboxObject].
-##
-## Position/rotation are in object space: origin = the object's base (the
-## model is aligned so its bottom sits on the origin), -Z = forward, +X = right.
 
-## Name shown in the debug panel and used by [method SandboxObject.attach_to].
 @export var point_name: StringName = &"point":
-	set(value):
-		point_name = value
-		emit_changed()
-@export var position: Vector3 = Vector3.ZERO:
-	set(value):
-		position = value
-		emit_changed()
-@export var rotation_degrees: Vector3 = Vector3.ZERO:
-	set(value):
-		rotation_degrees = value
-		emit_changed()
-## Optional: name of a node or skeleton bone inside a replacement GLB/glTF
-## model. If found, the point follows that node/bone and [member position] /
-## [member rotation_degrees] become an offset relative to it.
-@export var model_node: String = "":
-	set(value):
-		model_node = value
-		emit_changed()
+	set(v): point_name = v; emit_changed()
+## Pixels relative to the object's origin, or to the layer's pivot if [member layer] is set.
+@export var position: Vector2 = Vector2.ZERO:
+	set(v): position = v; emit_changed()
+@export var rotation_degrees: float = 0.0:
+	set(v): rotation_degrees = v; emit_changed()
+## Optional layer name: the point then follows that layer (and its animation).
+@export var layer: StringName = &"":
+	set(v): layer = v; emit_changed()

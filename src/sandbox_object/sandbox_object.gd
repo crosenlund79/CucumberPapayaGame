@@ -1,139 +1,142 @@
 @tool
 class_name SandboxObject
-extends Node3D
-## A configurable placeholder object for the interaction sandbox.
-##
-## Everything is set in the Inspector; internals are generated in code:
-##   SandboxObject      base transform (edited with the mouse / debug panel)
-##   └ Animator         ProceduralAnimator offset (rest pose = identity)
-##       ├ Visual       model: runtime custom GLB > model_scene > placeholder_mesh
-##       ├ AttachmentPoints
-##       ├ Area/Shape   picking + collision detection (runtime only)
-##       └ debug lines  selection box, collision shape (runtime only)
-## Add more objects by adding a SandboxObject node under "Objects" in main.tscn.
+extends Node2D
+## A configurable 2D object made of sprite layers. Everything is set in the
+## Inspector; internal nodes are generated in code:
+##   SandboxObject        base transform + z_index (edited by mouse / debug panel)
+##   └ Animator           whole-object ProceduralAnimator (rest pose = identity)
+##       ├ Layers/<name>  node at the layer pivot (position/rotation/scale/z)
+##       │   └ Animator   per-layer ProceduralAnimator (e.g. arm swing)
+##       │       ├ Sprite artwork (offset so the image pivot sits on the node)
+##       │       └ points bound to this layer
+##       └ Points         object-space attachment points
+## The object's origin is its pivot for rotation/scale and the mouse tools.
 
 signal collision_started(other: SandboxObject)
 signal collision_ended(other: SandboxObject)
 
 const PICK_LAYER := 2 ## Physics layer "sandbox_objects".
+const OVERLAY_Z := 900 ## Absolute z for debug overlays.
 const SELECTION_COLOR := Color(1.0, 0.85, 0.2)
 const SHAPE_COLOR := Color(0.3, 1.0, 0.5)
 const COLLIDING_COLOR := Color(1.0, 0.25, 0.25)
 const POINT_COLOR := Color(1.0, 0.55, 0.1)
+const PIVOT_COLOR := Color(0.3, 0.8, 1.0)
 
 @export var display_name: String = "Object"
-
-@export_group("Model")
-## Primitive placeholder (a .tres under res://assets/meshes/).
-@export var placeholder_mesh: Mesh:
+## Sprite layers, drawn by their z index (then list order).
+@export var layers: Array[SpriteLayerConfig] = []:
 	set(value):
-		if placeholder_mesh != null and placeholder_mesh.changed.is_connected(_queue_rebuild):
-			placeholder_mesh.changed.disconnect(_queue_rebuild)
-		placeholder_mesh = value
-		if Engine.is_editor_hint() and value != null and not value.changed.is_connected(_queue_rebuild):
-			value.changed.connect(_queue_rebuild)
-		_queue_rebuild()
-## Material for the placeholder mesh (a .tres under res://assets/materials/).
-@export var material: Material:
-	set(value):
-		material = value
-		_queue_rebuild()
-## Imported GLB/glTF scene. Replaces the placeholder mesh when set.
-@export var model_scene: PackedScene:
-	set(value):
-		model_scene = value
-		_queue_rebuild()
-## Logical name for a runtime drop-in model: custom/graphics/<name>.glb or .gltf
-## (next to the exported .exe, or res://custom in the editor). Wins over model_scene.
-@export var override_name: String = ""
-## Fine-tune a replacement model: offset/rotation/scale of the model inside the object.
-@export var model_offset: Vector3 = Vector3.ZERO:
-	set(value):
-		model_offset = value
-		_queue_rebuild()
-@export var model_rotation_degrees: Vector3 = Vector3.ZERO:
-	set(value):
-		model_rotation_degrees = value
-		_queue_rebuild()
-@export var model_scale: Vector3 = Vector3.ONE:
-	set(value):
-		model_scale = value
-		_queue_rebuild()
-## Shift the model so its lowest point sits on the object's origin (the "feet").
-@export var align_bottom_to_origin: bool = true:
-	set(value):
-		align_bottom_to_origin = value
-		_queue_rebuild()
-
-@export_group("Collision")
-## Custom collision shape (centred on the model bounds). Empty = auto-fit box.
-@export var collision_shape: Shape3D:
-	set(value):
-		collision_shape = value
-		_queue_rebuild()
-## Extra margin added to the auto-fitted box (metres per side).
-@export_range(0.0, 1.0, 0.01) var collision_padding: float = 0.0:
-	set(value):
-		collision_padding = value
+		layers = value
+		_watch_configs(layers)
 		_queue_rebuild()
 
 @export_group("Animation")
-## Procedural animation (a .tres under res://assets/animations/).
+## Whole-object procedural animation (a .tres under res://assets/animations/).
 @export var animation: ProceduralAnimationConfig
-## Object to walk toward in APPROACH mode.
-@export var interaction_target: Node3D
+## Object to move toward in APPROACH mode.
+@export var interaction_target: Node2D
 
 @export_group("Attachment Points")
 @export var attachment_points: Array[AttachmentPointConfig] = []:
 	set(value):
 		attachment_points = value
-		if Engine.is_editor_hint():
-			for cfg in attachment_points:
-				if cfg != null and not cfg.changed.is_connected(_queue_rebuild):
-					cfg.changed.connect(_queue_rebuild)
+		_watch_configs(attachment_points)
 		_queue_rebuild()
 
-## Human-readable description of where the current model came from.
-var model_source: String = "placeholder"
+@export_group("Collision")
+## Extra margin around each layer's opaque pixels (pixels).
+@export_range(0.0, 64.0, 0.5) var collision_padding: float = 0.0
+## Pixels more transparent than this are ignored by mouse picking.
+@export_range(0.0, 1.0, 0.01) var pick_alpha_threshold: float = 0.1
+
+
+## Runtime state of one layer.
+class LayerState:
+	var config: SpriteLayerConfig
+	var node: Node2D
+	var animator: ProceduralAnimator
+	var sprite: Sprite2D
+	var art: ArtResolver.Art
+	var pivot: Vector2 ## effective normalized pivot (sidecar wins over config)
+	var pixel_scale: float = 1.0
+	var area: Area2D
+	var shape: CollisionShape2D
+	var outline: Line2D
+	var pivot_dot: Polygon2D
+
+
+var animator: ProceduralAnimator
+var layer_states: Array[LayerState] = []
 var colliding_with: Array[SandboxObject] = []
 var attached_to: SandboxObject = null
 var attached_point: StringName = &""
-var attached_own_point: StringName = &""
-var animator: ProceduralAnimator
 
-var _visual: Node3D
-var _points_root: Node3D
-var _area: Area3D
-var _shape: CollisionShape3D
-var _selection_box: MeshInstance3D
-var _shape_debug: MeshInstance3D
-var _markers: Dictionary = {} # StringName -> Marker3D
-var _anchors: Array[Node] = [] # BoneAttachment3D helpers we created
+var _layers_root: Node2D
+var _points_root: Node2D
+var _selection_outline: Line2D
+var _pivot_cross: Line2D
+var _markers: Dictionary = {} # StringName -> Marker2D
 var _home_parent: Node
-var _home_transform: Transform3D
+var _home_transform: Transform2D
+var _home_z: int = 0
 var _selected: bool = false
-var _show_shape: bool = false
+var _show_shapes: bool = false
 var _show_points: bool = true
 var _rebuild_queued: bool = false
-
-static var _material_cache: Dictionary = {}
 
 
 func _ready() -> void:
 	animator = ProceduralAnimator.new()
 	animator.name = "Animator"
 	add_child(animator, false, Node.INTERNAL_MODE_BACK)
-	_visual = _make_child(animator, Node3D.new(), "Visual")
-	_points_root = _make_child(animator, Node3D.new(), "AttachmentPoints")
 	if not Engine.is_editor_hint():
 		_home_parent = get_parent()
 		_home_transform = transform
-		_build_runtime_nodes()
+		_home_z = z_index
 		animator.setup(animation, interaction_target)
 	_rebuild()
 
 
+func _physics_process(_delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	var now: Array[SandboxObject] = []
+	for st in layer_states:
+		if st.area == null:
+			continue
+		for area in st.area.get_overlapping_areas():
+			var other := find_owner_object(area)
+			if other != null and other != self and not now.has(other):
+				now.append(other)
+	if now == colliding_with:
+		return
+	var before := colliding_with
+	colliding_with = now
+	for other in now:
+		if not before.has(other):
+			collision_started.emit(other)
+	for other in before:
+		if not now.has(other):
+			collision_ended.emit(other)
+	update_debug_visibility()
+
+
 # --- Public API ---------------------------------------------------------------
+
+func get_layer_names() -> Array[StringName]:
+	var names: Array[StringName] = []
+	for st in layer_states:
+		names.append(st.config.layer_name)
+	return names
+
+
+func get_layer_state(layer_name: StringName) -> LayerState:
+	for st in layer_states:
+		if st.config.layer_name == layer_name:
+			return st
+	return null
+
 
 func get_attachment_point_names() -> Array[StringName]:
 	var names: Array[StringName] = []
@@ -142,35 +145,73 @@ func get_attachment_point_names() -> Array[StringName]:
 	return names
 
 
-func get_attachment_marker(point: StringName) -> Marker3D:
+func get_attachment_marker(point: StringName) -> Marker2D:
 	var marker: Variant = _markers.get(point)
 	return marker if is_instance_valid(marker) else null
 
 
-## Model bounds in object space (unaffected by the current animation offset).
-func get_visual_aabb() -> AABB:
-	var result := AABB()
+## Re-applies a layer's (edited) settings without rebuilding the object.
+func refresh_layer(st: LayerState) -> void:
+	var cfg := st.config
+	st.node.position = cfg.position
+	st.node.rotation_degrees = cfg.rotation_degrees
+	st.node.scale = cfg.scale
+	st.node.z_index = cfg.z_index
+	st.node.visible = cfg.visible
+	st.sprite.self_modulate = cfg.modulate
+	var size := Vector2(st.art.image.get_size())
+	var pivot_px := st.pivot * size
+	st.sprite.offset = -pivot_px
+	st.sprite.scale = Vector2.ONE * st.pixel_scale
+	if st.shape != null:
+		var used := Rect2(st.art.image.get_used_rect())
+		var r := Rect2(used.position - pivot_px, used.size).grow(collision_padding)
+		(st.shape.shape as RectangleShape2D).size = r.size.clamp(Vector2.ONE, Vector2(100000, 100000))
+		st.shape.position = r.get_center()
+		st.shape.set_deferred("disabled", not (cfg.visible and cfg.collides))
+		st.outline.points = _rect_points(r)
+	_update_selection_outline()
+	update_debug_visibility()
+
+
+## Object-space bounds of all visible layers at rest.
+func get_bounds() -> Rect2:
+	var result := Rect2()
 	var first := true
-	if _visual == null:
-		return result
-	for node in _visual.find_children("*", "MeshInstance3D", true, false):
-		var mi := node as MeshInstance3D
-		if mi.mesh == null:
+	for st in layer_states:
+		if not st.config.visible:
 			continue
-		var box: AABB = _relative_transform(mi, animator) * mi.get_aabb()
-		result = box if first else result.merge(box)
+		var size := Vector2(st.art.image.get_size())
+		var r: Rect2 = st.node.transform * st.sprite.transform * Rect2(-st.pivot * size, size)
+		result = r if first else result.merge(r)
 		first = false
 	return result
 
 
-## World-space centre of the model, including the animation offset.
-func get_world_center() -> Vector3:
-	return animator.global_transform * get_visual_aabb().get_center()
+func get_world_center() -> Vector2:
+	return animator.global_transform * get_bounds().get_center()
+
+
+## The topmost visible layer sprite with an opaque pixel under [param world_point], or null.
+func hit_test(world_point: Vector2) -> Sprite2D:
+	var best: Sprite2D = null
+	for st in layer_states:
+		if not st.config.visible:
+			continue
+		var image := st.art.image
+		var px := Vector2i((st.sprite.to_local(world_point) - st.sprite.offset).floor())
+		if px.x < 0 or px.y < 0 or px.x >= image.get_width() or px.y >= image.get_height():
+			continue
+		if image.get_pixelv(px).a < pick_alpha_threshold:
+			continue
+		if best == null or draws_above(st.sprite, best):
+			best = st.sprite
+	return best
 
 
 ## Snaps this object onto [param point] of [param other]. If [param own_point]
 ## is given, that point of this object is aligned with the target point
-## (e.g. a prop's "grip" to a character's "hand_r"). World scale is preserved.
+## (e.g. a prop's "grip" to a character's "hand"). World scale is preserved.
 func attach_to(other: SandboxObject, point: StringName, own_point: StringName = &"") -> bool:
 	var marker := other.get_attachment_marker(point) if other != null else null
 	if marker == null or other == self or is_ancestor_of(other):
@@ -178,20 +219,19 @@ func attach_to(other: SandboxObject, point: StringName, own_point: StringName = 
 		return false
 	if attached_to != null:
 		detach()
-	var world_scale := global_basis.get_scale()
-	var rel := Transform3D.IDENTITY
+	var world_scale := global_scale
+	var rel := Transform2D.IDENTITY
 	var own_marker := get_attachment_marker(own_point) if own_point != &"" else null
 	if own_marker != null:
 		rel = _relative_transform(own_marker, animator)
 	reparent(marker, true)
-	var target := marker.global_transform.orthonormalized()
-	var b := (target.basis * rel.basis.orthonormalized().inverse()) * Basis.from_scale(world_scale)
-	global_transform = Transform3D(b, target.origin - b * rel.origin)
+	var rot := marker.global_rotation - rel.get_rotation()
+	var basis := Transform2D(rot, world_scale, 0.0, Vector2.ZERO)
+	global_transform = Transform2D(rot, world_scale, 0.0, marker.global_position - basis.basis_xform(rel.origin))
 	attached_to = other
 	attached_point = point
-	attached_own_point = own_point if own_marker != null else &""
-	_update_debug_visibility()
-	other._update_debug_visibility()
+	update_debug_visibility()
+	other.update_debug_visibility()
 	return true
 
 
@@ -203,63 +243,94 @@ func detach() -> void:
 	reparent(_home_parent, true)
 	attached_to = null
 	attached_point = &""
-	attached_own_point = &""
-	_update_debug_visibility()
-	previous._update_debug_visibility()
+	update_debug_visibility()
+	previous.update_debug_visibility()
 
 
-## Back to the transform (and parent) the object had when the sandbox started.
+## Back to the transform, draw order and parent the object had at start.
 func reset_transform() -> void:
 	detach()
 	transform = _home_transform
+	z_index = _home_z
+
+
+func flip_horizontal() -> void:
+	scale.x = -scale.x
 
 
 func is_colliding_with(other: SandboxObject) -> bool:
 	return colliding_with.has(other)
 
 
-## True if one of the two objects is attached directly to the other. Such
-## contact is intentional, so it is reported but not highlighted in red.
+## True if one object is attached directly to the other (contact is intended,
+## so it is reported but not highlighted in red).
 func is_attachment_pair(other: SandboxObject) -> bool:
 	return other != null and (attached_to == other or other.attached_to == self)
 
 
-## Immediate shape query (used to block overlaps while dragging): other
-## sandbox objects currently intersecting this object's collision shape.
+## Immediate overlap query (used to block overlaps while dragging).
 func query_overlaps() -> Array[SandboxObject]:
 	var result: Array[SandboxObject] = []
-	if _shape == null or _shape.shape == null or not is_inside_tree():
+	if not is_inside_tree():
 		return result
-	var params := PhysicsShapeQueryParameters3D.new()
-	params.shape = _shape.shape
-	params.transform = _shape.global_transform
-	params.collide_with_areas = true
-	params.collide_with_bodies = false
-	params.collision_mask = PICK_LAYER
-	params.exclude = [_area.get_rid()]
-	for hit in get_world_3d().direct_space_state.intersect_shape(params, 16):
-		var other := find_owner_object(hit["collider"])
-		if other != null and other != self and not result.has(other):
-			result.append(other)
+	var own: Array[RID] = []
+	for st in layer_states:
+		if st.area != null:
+			own.append(st.area.get_rid())
+	var space := get_world_2d().direct_space_state
+	for st in layer_states:
+		if st.shape == null or st.shape.disabled:
+			continue
+		var params := PhysicsShapeQueryParameters2D.new()
+		params.shape = st.shape.shape
+		params.transform = st.shape.global_transform
+		params.collide_with_areas = true
+		params.collide_with_bodies = false
+		params.collision_mask = PICK_LAYER
+		params.exclude = own
+		for hit in space.intersect_shape(params, 16):
+			var other := find_owner_object(hit["collider"])
+			if other != null and other != self and not result.has(other):
+				result.append(other)
 	return result
 
 
 func set_selected(value: bool) -> void:
 	_selected = value
-	_update_debug_visibility()
+	update_debug_visibility()
 
 
-func set_show_collision_shape(value: bool) -> void:
-	_show_shape = value
-	_update_debug_visibility()
+func set_show_collision_shapes(value: bool) -> void:
+	_show_shapes = value
+	update_debug_visibility()
 
 
-func set_show_attachment_points(value: bool) -> void:
+func set_show_points(value: bool) -> void:
 	_show_points = value
-	for marker: Marker3D in _markers.values():
+	update_debug_visibility()
+
+
+func update_debug_visibility() -> void:
+	if _pivot_cross == null:
+		return
+	var colliding := false
+	for other in colliding_with:
+		if not is_attachment_pair(other):
+			colliding = true
+	for st in layer_states:
+		if st.outline != null:
+			st.outline.visible = (_show_shapes or colliding) and st.config.collides
+			st.outline.default_color = COLLIDING_COLOR if colliding else SHAPE_COLOR
+		if st.pivot_dot != null:
+			st.pivot_dot.visible = _show_points
+	if _selection_outline != null:
+		_selection_outline.visible = _selected
+	_pivot_cross.visible = _show_points or _selected
+	for marker: Variant in _markers.values():
 		if is_instance_valid(marker):
 			for child in marker.get_children():
-				(child as Node3D).visible = value
+				if not child is SandboxObject:
+					child.visible = _show_points
 
 
 ## The SandboxObject that owns [param node] (walks up the tree), or null.
@@ -271,7 +342,35 @@ static func find_owner_object(node: Node) -> SandboxObject:
 	return null
 
 
+## Draw-order comparison: higher effective z wins, then later in the tree.
+static func draws_above(a: CanvasItem, b: CanvasItem) -> bool:
+	var za := effective_z(a)
+	var zb := effective_z(b)
+	if za != zb:
+		return za > zb
+	return a.is_greater_than(b)
+
+
+static func effective_z(item: CanvasItem) -> int:
+	var z := 0
+	var node: Node = item
+	while node is CanvasItem:
+		z += (node as CanvasItem).z_index
+		if not (node as CanvasItem).z_as_relative:
+			break
+		node = node.get_parent()
+	return z
+
+
 # --- Building ---------------------------------------------------------------------
+
+func _watch_configs(configs: Array) -> void:
+	if not Engine.is_editor_hint():
+		return
+	for cfg: Resource in configs:
+		if cfg != null and not cfg.changed.is_connected(_queue_rebuild):
+			cfg.changed.connect(_queue_rebuild)
+
 
 func _queue_rebuild() -> void:
 	if not is_node_ready() or _rebuild_queued:
@@ -282,188 +381,98 @@ func _queue_rebuild() -> void:
 
 func _rebuild() -> void:
 	_rebuild_queued = false
-	if _visual == null: # e.g. tool script reloaded in the editor
+	if animator == null: # e.g. tool script reloaded in the editor
 		return
-	_release_attached_children()
-	_build_model()
-	_build_attachment_points()
-	if not Engine.is_editor_hint():
-		_fit_collision()
-		_update_debug_visibility()
-
-
-func _build_model() -> void:
-	for child in _visual.get_children():
-		_visual.remove_child(child)
-		child.queue_free()
-	_visual.transform = Transform3D(
-		Basis.from_euler(model_rotation_degrees * (PI / 180.0)) * Basis.from_scale(model_scale),
-		model_offset)
-
-	var model: Node3D = null
-	model_source = "placeholder"
-	if not Engine.is_editor_hint() and not override_name.is_empty():
-		model = ModelResolver.load_model_override(override_name)
-		if model != null:
-			model_source = "custom/%s/%s" % [ModelResolver.SUBFOLDER, ModelResolver.find_override_path(override_name).get_file()]
-	if model == null and model_scene != null:
-		var instance := model_scene.instantiate()
-		if instance is Node3D:
-			model = instance
-			model_source = "model_scene " + model_scene.resource_path.get_file()
-		elif instance != null:
-			push_warning("%s: model_scene root is not a 3D node; using placeholder." % display_name)
-			instance.free()
-	if model == null:
-		var mesh_instance := MeshInstance3D.new()
-		mesh_instance.mesh = placeholder_mesh if placeholder_mesh != null else BoxMesh.new()
-		mesh_instance.material_override = material
-		model = mesh_instance
-	model.name = "Model"
-	_visual.add_child(model)
-
-	if align_bottom_to_origin:
-		var aabb := get_visual_aabb()
-		if aabb.size != Vector3.ZERO:
-			_visual.position.y += model_offset.y - aabb.position.y
-
-
-func _build_attachment_points() -> void:
+	# Objects attached to our points must survive the rebuild.
 	for marker: Variant in _markers.values():
 		if is_instance_valid(marker):
-			marker.get_parent().remove_child(marker)
-			marker.queue_free()
+			for child in marker.get_children():
+				if child is SandboxObject:
+					(child as SandboxObject).detach()
+	for child in animator.get_children():
+		animator.remove_child(child)
+		child.queue_free()
 	_markers.clear()
-	for anchor in _anchors:
-		if is_instance_valid(anchor):
-			anchor.queue_free()
-	_anchors.clear()
+	layer_states.clear()
 
+	_layers_root = _make_child(animator, Node2D.new(), "Layers")
+	_points_root = _make_child(animator, Node2D.new(), "Points")
+	for cfg in layers:
+		if cfg != null:
+			layer_states.append(_build_layer(cfg))
 	for cfg in attachment_points:
-		if cfg == null or _markers.has(cfg.point_name):
-			continue
-		var marker := Marker3D.new()
-		marker.name = String(cfg.point_name)
-		marker.position = cfg.position
-		marker.rotation_degrees = cfg.rotation_degrees
-		marker.gizmo_extents = 0.12
-		_find_anchor(cfg.model_node).add_child(marker)
-		_add_point_gizmo(marker, cfg.point_name)
-		_markers[cfg.point_name] = marker
+		if cfg != null and not _markers.has(cfg.point_name):
+			_build_point(cfg)
+
+	_pivot_cross = _make_overlay(Line2D.new(), animator, "PivotCross", PIVOT_COLOR)
+	_pivot_cross.points = PackedVector2Array([Vector2(-14, 0), Vector2(14, 0), Vector2.ZERO, Vector2(0, -14), Vector2(0, 14)])
+	if not Engine.is_editor_hint():
+		_selection_outline = _make_overlay(Line2D.new(), animator, "SelectionOutline", SELECTION_COLOR)
+	for st in layer_states:
+		refresh_layer(st)
+	update_debug_visibility()
 
 
-## Parent for an attachment point: a named node or skeleton bone inside the
-## model if requested and found, otherwise object space.
-func _find_anchor(model_node: String) -> Node3D:
-	if model_node.is_empty():
-		return _points_root
-	var model := _visual.get_node_or_null("Model")
-	if model != null:
-		var found := model.find_child(model_node, true, false)
-		if found is Node3D:
-			return found
-		for skeleton: Skeleton3D in model.find_children("*", "Skeleton3D", true, false):
-			if skeleton.find_bone(model_node) >= 0:
-				var bone_attachment := BoneAttachment3D.new()
-				bone_attachment.bone_name = model_node
-				skeleton.add_child(bone_attachment)
-				_anchors.append(bone_attachment)
-				return bone_attachment
-	if not Engine.is_editor_hint() or model_scene != null:
-		push_warning("%s: model node/bone '%s' not found; attachment point uses object space." % [display_name, model_node])
-	return _points_root
+func _build_layer(source: SpriteLayerConfig) -> LayerState:
+	var st := LayerState.new()
+	# Runtime edits (debug panel) go to a private copy, never to the scene file.
+	st.config = source if Engine.is_editor_hint() else source.duplicate()
+	st.node = _make_child(_layers_root, Node2D.new(), String(source.layer_name))
+	st.animator = _make_child(st.node, ProceduralAnimator.new(), "Animator")
+	if not Engine.is_editor_hint():
+		st.animator.setup(source.animation, interaction_target)
+	st.sprite = _make_child(st.animator, Sprite2D.new(), "Sprite")
+	st.sprite.centered = false
+	st.sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	st.art = ArtResolver.resolve(source.art_name)
+	st.sprite.texture = st.art.texture
+	st.pivot = st.art.pivot if st.art.has_sidecar_pivot else source.pivot
+	st.pixel_scale = st.art.pixel_scale
+	st.pivot_dot = _make_overlay(Polygon2D.new(), st.node, "PivotDot", PIVOT_COLOR)
+	st.pivot_dot.polygon = _circle_points(4.0)
+	if not Engine.is_editor_hint():
+		st.area = _make_child(st.sprite, Area2D.new(), "Area")
+		st.area.collision_layer = PICK_LAYER
+		st.area.collision_mask = PICK_LAYER
+		st.shape = _make_child(st.area, CollisionShape2D.new(), "Shape")
+		st.shape.shape = RectangleShape2D.new()
+		st.outline = _make_overlay(Line2D.new(), st.sprite, "CollisionOutline", SHAPE_COLOR)
+	return st
 
 
-func _add_point_gizmo(marker: Marker3D, point_name: StringName) -> void:
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.035
-	sphere.height = 0.07
-	var dot := MeshInstance3D.new()
-	dot.mesh = sphere
-	dot.material_override = _debug_material(POINT_COLOR, 1.0)
-	dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	marker.add_child(dot)
-	var label := Label3D.new()
-	label.text = String(point_name)
-	label.font_size = 28
-	label.outline_size = 6
-	label.pixel_size = 0.0025
-	label.position = Vector3(0, 0.07, 0)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
-	label.modulate = POINT_COLOR
+func _build_point(cfg: AttachmentPointConfig) -> void:
+	var parent: Node2D = _points_root
+	if cfg.layer != &"":
+		var st := get_layer_state(cfg.layer)
+		if st != null:
+			parent = st.animator
+		else:
+			push_warning("%s: attachment point '%s' refers to unknown layer '%s'." % [display_name, cfg.point_name, cfg.layer])
+	var marker := Marker2D.new()
+	marker.name = String(cfg.point_name)
+	marker.position = cfg.position
+	marker.rotation_degrees = cfg.rotation_degrees
+	marker.gizmo_extents = 12.0
+	parent.add_child(marker)
+	var diamond := _make_overlay(Polygon2D.new(), marker, "Gizmo", POINT_COLOR)
+	diamond.polygon = PackedVector2Array([Vector2(0, -6), Vector2(6, 0), Vector2(0, 6), Vector2(-6, 0)])
+	var label := Label.new()
+	label.text = String(cfg.point_name)
+	label.position = Vector2(8, -10)
+	label.add_theme_font_size_override("font_size", 12)
+	label.add_theme_color_override("font_color", POINT_COLOR)
+	label.add_theme_color_override("font_outline_color", Color.BLACK)
+	label.add_theme_constant_override("outline_size", 4)
+	label.z_index = OVERLAY_Z
+	label.z_as_relative = false
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	marker.add_child(label)
-	dot.visible = _show_points
-	label.visible = _show_points
+	_markers[cfg.point_name] = marker
 
 
-func _build_runtime_nodes() -> void:
-	_area = _make_child(animator, Area3D.new(), "Area")
-	_area.collision_layer = PICK_LAYER
-	_area.collision_mask = PICK_LAYER
-	_shape = _make_child(_area, CollisionShape3D.new(), "Shape")
-	_area.area_entered.connect(_on_area_entered)
-	_area.area_exited.connect(_on_area_exited)
-	_selection_box = _make_child(animator, MeshInstance3D.new(), "SelectionBox")
-	_selection_box.material_override = _debug_material(SELECTION_COLOR, 1.0)
-	_selection_box.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_shape_debug = _make_child(animator, MeshInstance3D.new(), "ShapeDebug")
-	_shape_debug.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
-
-func _fit_collision() -> void:
-	var aabb := get_visual_aabb()
-	if collision_shape != null:
-		_shape.shape = collision_shape
-	else:
-		var box := BoxShape3D.new()
-		box.size = (aabb.size + Vector3.ONE * collision_padding * 2.0).clamp(Vector3.ONE * 0.01, Vector3.ONE * 1000.0)
-		_shape.shape = box
-	_shape.position = aabb.get_center()
-	_shape_debug.mesh = _shape.shape.get_debug_mesh()
-	_shape_debug.position = _shape.position
-	_selection_box.mesh = _box_lines(aabb.grow(0.03))
-
-
-func _update_debug_visibility() -> void:
-	if _selection_box == null:
-		return
-	_selection_box.visible = _selected
-	var colliding := false
-	for other in colliding_with:
-		if not is_attachment_pair(other):
-			colliding = true
-	_shape_debug.visible = _show_shape or colliding
-	_shape_debug.material_override = _debug_material(COLLIDING_COLOR if colliding else SHAPE_COLOR, 0.3)
-
-
-## Detaches objects that are attached to this object's points before the
-## points are rebuilt, so they are not freed together with the markers.
-func _release_attached_children() -> void:
-	for marker: Variant in _markers.values():
-		if not is_instance_valid(marker):
-			continue
-		for child in marker.get_children():
-			if child is SandboxObject:
-				(child as SandboxObject).detach()
-
-
-func _on_area_entered(area: Area3D) -> void:
-	var other := find_owner_object(area)
-	if other == null or other == self or colliding_with.has(other):
-		return
-	colliding_with.append(other)
-	_update_debug_visibility()
-	collision_started.emit(other)
-
-
-func _on_area_exited(area: Area3D) -> void:
-	var other := find_owner_object(area)
-	if other == null or not colliding_with.has(other):
-		return
-	colliding_with.erase(other)
-	_update_debug_visibility()
-	collision_ended.emit(other)
+func _update_selection_outline() -> void:
+	if _selection_outline != null:
+		_selection_outline.points = _rect_points(get_bounds().grow(4.0))
 
 
 # --- Helpers ------------------------------------------------------------------------
@@ -474,44 +483,33 @@ func _make_child(parent: Node, child: Node, child_name: String) -> Node:
 	return child
 
 
-## Transform of [param node] relative to [param ancestor] (works outside the tree).
-static func _relative_transform(node: Node, ancestor: Node) -> Transform3D:
-	var t := Transform3D.IDENTITY
+func _make_overlay(item: CanvasItem, parent: Node, item_name: String, color: Color) -> CanvasItem:
+	item.z_index = OVERLAY_Z
+	item.z_as_relative = false
+	if item is Line2D:
+		(item as Line2D).width = 2.0
+		(item as Line2D).default_color = color
+	elif item is Polygon2D:
+		(item as Polygon2D).color = color
+	return _make_child(parent, item, item_name)
+
+
+static func _relative_transform(node: Node, ancestor: Node) -> Transform2D:
+	var t := Transform2D.IDENTITY
 	var current := node
 	while current != null and current != ancestor:
-		if current is Node3D:
-			t = (current as Node3D).transform * t
+		if current is Node2D:
+			t = (current as Node2D).transform * t
 		current = current.get_parent()
 	return t
 
 
-static func _box_lines(aabb: AABB) -> ImmediateMesh:
-	var mesh := ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	for i in 8:
-		for bit in [1, 2, 4]:
-			var j: int = i | bit
-			if j != i:
-				mesh.surface_add_vertex(aabb.get_endpoint(i))
-				mesh.surface_add_vertex(aabb.get_endpoint(j))
-	mesh.surface_end()
-	return mesh
+static func _rect_points(r: Rect2) -> PackedVector2Array:
+	return PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y), r.position])
 
 
-## Unshaded overlay material. Opaque ones draw on top of everything (lines,
-## point dots); translucent ones (collision shape fill) keep the depth test.
-static func _debug_material(color: Color, alpha: float) -> StandardMaterial3D:
-	var key := Color(color, alpha)
-	if _material_cache.has(key):
-		return _material_cache[key]
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = key
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.render_priority = 10
-	if alpha < 1.0:
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	else:
-		mat.no_depth_test = true
-	_material_cache[key] = mat
-	return mat
+static func _circle_points(radius: float) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for i in 10:
+		pts.append(Vector2.from_angle(TAU * i / 10.0) * radius)
+	return pts

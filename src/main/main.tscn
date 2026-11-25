@@ -2,122 +2,135 @@
 
 [ext_resource type="Script" path="res://src/main/sandbox_main.gd" id="1_main"]
 [ext_resource type="Script" path="res://src/sandbox_object/sandbox_object.gd" id="2_object"]
-[ext_resource type="Script" path="res://src/sandbox_object/attachment_point_config.gd" id="3_point"]
-[ext_resource type="Mesh" path="res://assets/meshes/template_object_a_mesh.tres" id="4_mesh_a"]
-[ext_resource type="Mesh" path="res://assets/meshes/template_object_b_mesh.tres" id="5_mesh_b"]
-[ext_resource type="Material" path="res://assets/materials/template_object_a_material.tres" id="6_mat_a"]
-[ext_resource type="Material" path="res://assets/materials/template_object_b_material.tres" id="7_mat_b"]
-[ext_resource type="Resource" path="res://assets/animations/template_object_a_animation.tres" id="8_anim_a"]
-[ext_resource type="Resource" path="res://assets/animations/template_object_b_animation.tres" id="9_anim_b"]
-[ext_resource type="Material" path="res://assets/materials/template_floor_material.tres" id="10_floor"]
-[ext_resource type="Script" path="res://src/camera/orbit_camera.gd" id="11_camera"]
-[ext_resource type="Script" path="res://src/interaction/object_manipulator.gd" id="12_manipulator"]
-[ext_resource type="Script" path="res://src/debug/debug_panel.gd" id="13_panel"]
+[ext_resource type="Script" path="res://src/sandbox_object/sprite_layer_config.gd" id="3_layer"]
+[ext_resource type="Script" path="res://src/sandbox_object/attachment_point_config.gd" id="4_point"]
+[ext_resource type="Resource" path="res://assets/animations/template_object_a_animation.tres" id="5_anim_a"]
+[ext_resource type="Resource" path="res://assets/animations/template_object_a_arm_front.tres" id="6_arm_front"]
+[ext_resource type="Resource" path="res://assets/animations/template_object_a_arm_back.tres" id="7_arm_back"]
+[ext_resource type="Resource" path="res://assets/animations/template_object_b_animation.tres" id="8_anim_b"]
+[ext_resource type="Resource" path="res://assets/animations/template_object_b_emblem.tres" id="9_emblem"]
+[ext_resource type="Script" path="res://src/camera/pan_zoom_camera.gd" id="10_camera"]
+[ext_resource type="Script" path="res://src/interaction/object_manipulator.gd" id="11_manipulator"]
+[ext_resource type="Script" path="res://src/debug/debug_panel.gd" id="12_panel"]
+[ext_resource type="Script" path="res://src/animation/path_display.gd" id="13_path"]
+[ext_resource type="Script" path="res://src/world/grid_background.gd" id="14_grid"]
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
-sky_top_color = Color(0.5, 0.54, 0.58, 1)
-sky_horizon_color = Color(0.7, 0.71, 0.72, 1)
-ground_bottom_color = Color(0.28, 0.28, 0.29, 1)
-ground_horizon_color = Color(0.7, 0.71, 0.72, 1)
+[sub_resource type="Resource" id="Layer_a_body"]
+script = ExtResource("3_layer")
+layer_name = &"body"
+art_name = "object_a_body"
+pivot = Vector2(0.5, 1)
 
-[sub_resource type="Sky" id="Sky_main"]
-sky_material = SubResource("ProceduralSkyMaterial_sky")
+[sub_resource type="Resource" id="Layer_a_head"]
+script = ExtResource("3_layer")
+layer_name = &"head"
+art_name = "object_a_head"
+position = Vector2(0, -170)
+pivot = Vector2(0.5, 0.95)
+z_index = 1
 
-[sub_resource type="Environment" id="Environment_main"]
-background_mode = 2
-sky = SubResource("Sky_main")
-ambient_light_source = 3
-reflected_light_source = 2
-tonemap_mode = 2
+[sub_resource type="Resource" id="Layer_a_arm_back"]
+script = ExtResource("3_layer")
+layer_name = &"arm_back"
+art_name = "object_a_arm"
+position = Vector2(-20, -148)
+pivot = Vector2(0.5, 0.15)
+z_index = -1
+modulate = Color(0.8, 0.8, 0.84, 1)
+animation = ExtResource("7_arm_back")
 
-[sub_resource type="PlaneMesh" id="PlaneMesh_floor"]
-size = Vector2(40, 40)
+[sub_resource type="Resource" id="Layer_a_arm_front"]
+script = ExtResource("3_layer")
+layer_name = &"arm_front"
+art_name = "object_a_arm"
+position = Vector2(20, -148)
+pivot = Vector2(0.5, 0.15)
+z_index = 2
+animation = ExtResource("6_arm_front")
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
-size = Vector3(40, 0.2, 40)
+[sub_resource type="Resource" id="Point_a_hand"]
+script = ExtResource("4_point")
+point_name = &"hand"
+position = Vector2(0, 96)
+layer = &"arm_front"
 
-[sub_resource type="Resource" id="Point_a_hand_r"]
-script = ExtResource("3_point")
-point_name = &"hand_r"
-position = Vector3(0.45, 1, 0)
+[sub_resource type="Resource" id="Point_a_hand_back"]
+script = ExtResource("4_point")
+point_name = &"hand_back"
+position = Vector2(0, 96)
+layer = &"arm_back"
 
-[sub_resource type="Resource" id="Point_a_hand_l"]
-script = ExtResource("3_point")
-point_name = &"hand_l"
-position = Vector3(-0.45, 1, 0)
-
-[sub_resource type="Resource" id="Point_a_head"]
-script = ExtResource("3_point")
-point_name = &"head"
-position = Vector3(0, 1.8, 0)
+[sub_resource type="Resource" id="Point_a_head_top"]
+script = ExtResource("4_point")
+point_name = &"head_top"
+position = Vector2(0, -104)
+layer = &"head"
 
 [sub_resource type="Resource" id="Point_a_back"]
-script = ExtResource("3_point")
+script = ExtResource("4_point")
 point_name = &"back"
-position = Vector3(0, 1.2, 0.36)
+position = Vector2(-55, -110)
+
+[sub_resource type="Resource" id="Layer_b_crate"]
+script = ExtResource("3_layer")
+layer_name = &"crate"
+art_name = "object_b_crate"
+
+[sub_resource type="Resource" id="Layer_b_emblem"]
+script = ExtResource("3_layer")
+layer_name = &"emblem"
+art_name = "object_b_emblem"
+z_index = 1
+collides = false
+animation = ExtResource("9_emblem")
 
 [sub_resource type="Resource" id="Point_b_grip"]
-script = ExtResource("3_point")
+script = ExtResource("4_point")
 point_name = &"grip"
-position = Vector3(0, 0.25, 0)
+position = Vector2(0, -50)
 
 [sub_resource type="Resource" id="Point_b_top"]
-script = ExtResource("3_point")
+script = ExtResource("4_point")
 point_name = &"top"
-position = Vector3(0, 0.5, 0)
+position = Vector2(0, -60)
 
-[node name="Main" type="Node3D"]
+[node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
-environment = SubResource("Environment_main")
+[node name="Grid" type="Node2D" parent="."]
+z_index = -1000
+script = ExtResource("14_grid")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.819152, 0, 0.573576, 0.439385, 0.642788, -0.627507, -0.368688, 0.766044, 0.526541, 0, 6, 0)
-shadow_enabled = true
+[node name="Objects" type="Node2D" parent="."]
 
-[node name="Floor" type="StaticBody3D" parent="."]
-
-[node name="Mesh" type="MeshInstance3D" parent="Floor"]
-mesh = SubResource("PlaneMesh_floor")
-surface_material_override/0 = ExtResource("10_floor")
-
-[node name="Shape" type="CollisionShape3D" parent="Floor"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
-shape = SubResource("BoxShape3D_floor")
-
-[node name="Objects" type="Node3D" parent="."]
-
-[node name="ObjectA" type="Node3D" parent="Objects" node_paths=PackedStringArray("interaction_target")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.2, 0, 0)
+[node name="ObjectA" type="Node2D" parent="Objects" node_paths=PackedStringArray("interaction_target")]
+position = Vector2(-220, 120)
 script = ExtResource("2_object")
 display_name = "Object A"
-placeholder_mesh = ExtResource("4_mesh_a")
-material = ExtResource("6_mat_a")
-override_name = "object_a"
-animation = ExtResource("8_anim_a")
+layers = Array[ExtResource("3_layer")]([SubResource("Layer_a_body"), SubResource("Layer_a_head"), SubResource("Layer_a_arm_back"), SubResource("Layer_a_arm_front")])
+animation = ExtResource("5_anim_a")
 interaction_target = NodePath("../ObjectB")
-attachment_points = Array[ExtResource("3_point")]([SubResource("Point_a_hand_r"), SubResource("Point_a_hand_l"), SubResource("Point_a_head"), SubResource("Point_a_back")])
+attachment_points = Array[ExtResource("4_point")]([SubResource("Point_a_hand"), SubResource("Point_a_hand_back"), SubResource("Point_a_head_top"), SubResource("Point_a_back")])
 
-[node name="ObjectB" type="Node3D" parent="Objects"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0.6, 0)
+[node name="ObjectB" type="Node2D" parent="Objects"]
+position = Vector2(180, 0)
 script = ExtResource("2_object")
 display_name = "Object B"
-placeholder_mesh = ExtResource("5_mesh_b")
-material = ExtResource("7_mat_b")
-override_name = "object_b"
-animation = ExtResource("9_anim_b")
-attachment_points = Array[ExtResource("3_point")]([SubResource("Point_b_grip"), SubResource("Point_b_top")])
+layers = Array[ExtResource("3_layer")]([SubResource("Layer_b_crate"), SubResource("Layer_b_emblem")])
+animation = ExtResource("8_anim_b")
+attachment_points = Array[ExtResource("4_point")]([SubResource("Point_b_grip"), SubResource("Point_b_top")])
 
-[node name="OrbitCamera" type="Camera3D" parent="."]
-fov = 50.0
-script = ExtResource("11_camera")
+[node name="PathDisplay" type="Node2D" parent="."]
+script = ExtResource("13_path")
 
-[node name="ObjectManipulator" type="Node" parent="." node_paths=PackedStringArray("camera")]
-script = ExtResource("12_manipulator")
-camera = NodePath("../OrbitCamera")
+[node name="Camera" type="Camera2D" parent="."]
+position = Vector2(-200, -80)
+script = ExtResource("10_camera")
+
+[node name="ObjectManipulator" type="Node2D" parent="."]
+script = ExtResource("11_manipulator")
 
 [node name="UI" type="CanvasLayer" parent="."]
 
 [node name="DebugPanel" type="PanelContainer" parent="UI"]
-script = ExtResource("13_panel")
+script = ExtResource("12_panel")

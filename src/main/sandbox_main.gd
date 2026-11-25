@@ -1,17 +1,18 @@
 class_name SandboxMain
-extends Node3D
+extends Node2D
 ## Wires the sandbox together and owns the global actions/hotkeys.
 ## Every SandboxObject placed under "Objects" is picked up automatically.
 
-@export var show_attachment_points: bool = true
+@export var show_points: bool = true
 @export var show_collision_shapes: bool = false
 
 var objects: Array[SandboxObject] = []
 
-@onready var camera: OrbitCamera = $OrbitCamera
+@onready var camera: PanZoomCamera = $Camera
 @onready var manipulator: ObjectManipulator = $ObjectManipulator
+@onready var path_display: PathDisplay = $PathDisplay
 @onready var panel: DebugPanel = $UI/DebugPanel
-@onready var objects_root: Node3D = $Objects
+@onready var objects_root: Node2D = $Objects
 
 
 func _ready() -> void:
@@ -19,26 +20,37 @@ func _ready() -> void:
 		if child is SandboxObject:
 			objects.append(child)
 	manipulator.objects = objects
-	set_show_attachment_points(show_attachment_points)
+	set_show_points(show_points)
 	set_show_collision_shapes(show_collision_shapes)
 	panel.setup(self)
 
 
-func any_playing() -> bool:
+## Every animator in the sandbox (objects and their layers).
+func all_animators() -> Array[ProceduralAnimator]:
+	var result: Array[ProceduralAnimator] = []
 	for o in objects:
-		if o.animator.playing:
+		result.append(o.animator)
+		for st in o.layer_states:
+			result.append(st.animator)
+	return result
+
+
+func any_playing() -> bool:
+	for a in all_animators():
+		if a.playing:
 			return true
 	return false
 
 
 func play_all() -> void:
-	for o in objects:
-		o.animator.play()
+	for a in all_animators():
+		if a.config.mode != ProceduralAnimationConfig.Mode.NONE:
+			a.play()
 
 
 func pause_all() -> void:
-	for o in objects:
-		o.animator.pause()
+	for a in all_animators():
+		a.pause()
 
 
 func toggle_all() -> void:
@@ -49,8 +61,8 @@ func toggle_all() -> void:
 
 
 func reset_all_animations() -> void:
-	for o in objects:
-		o.animator.reset()
+	for a in all_animators():
+		a.reset()
 
 
 func reset_all_transforms() -> void:
@@ -64,21 +76,25 @@ func set_global_speed(value: float) -> void:
 	ProceduralAnimator.global_speed_scale = value
 
 
-func set_show_attachment_points(value: bool) -> void:
-	show_attachment_points = value
+func set_y_sort(enabled: bool) -> void:
+	objects_root.y_sort_enabled = enabled
+
+
+func set_show_points(value: bool) -> void:
+	show_points = value
 	for o in objects:
-		o.set_show_attachment_points(value)
+		o.set_show_points(value)
 
 
 func set_show_collision_shapes(value: bool) -> void:
 	show_collision_shapes = value
 	for o in objects:
-		o.set_show_collision_shape(value)
+		o.set_show_collision_shapes(value)
 
 
 func focus_selected() -> void:
 	var sel := manipulator.selected
-	camera.focus(sel.get_world_center() if sel != null else Vector3(0, 0.8, 0))
+	camera.focus(sel.get_world_center() if sel != null else Vector2.ZERO)
 
 
 func _unhandled_input(event: InputEvent) -> void:

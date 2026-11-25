@@ -1,33 +1,36 @@
 @tool
 class_name ProceduralAnimator
-extends Node3D
+extends Node2D
 ## Plays a [ProceduralAnimationConfig] by writing a local offset transform to
-## this node every frame.
-##
-## The parent [SandboxObject] keeps the user-placed base transform, so the
-## animation never overwrites manual positioning: rest pose = identity.
-## Progress is tracked in cycles, so changing speed never makes the motion jump.
+## this node every frame. The parent keeps the user-placed transform (rest pose
+## = identity), so animation never overwrites manual positioning. Progress is
+## tracked in cycles, so changing speed never makes the motion jump.
 
 signal state_changed
 
-## Multiplies the speed of every animator (debug panel "Global speed").
+## Multiplies the speed of every animator (debug panel "Speed ×").
 static var global_speed_scale: float = 1.0
 
 var config: ProceduralAnimationConfig
 ## Node to move toward in APPROACH mode (optional).
-var target: Node3D
-## Animation progress in cycles.
+var target: Node2D
 var cycles: float = 0.0
 var playing: bool = false
 
+var _curve: Curve2D
+var _curve_points: PackedVector2Array
+var _curve_closed: bool = false
+
 
 ## Uses a private copy of [param cfg] so runtime tweaks never leak into the
-## shared .tres file or into other objects using the same resource.
-func setup(cfg: ProceduralAnimationConfig, approach_target: Node3D) -> void:
+## shared .tres file or into other users of the same resource.
+func setup(cfg: ProceduralAnimationConfig, approach_target: Node2D = null) -> void:
 	config = cfg.duplicate() if cfg != null else ProceduralAnimationConfig.new()
+	if cfg == null:
+		config.mode = ProceduralAnimationConfig.Mode.NONE
 	target = approach_target
 	cycles = 0.0
-	playing = config.autoplay and not Engine.is_editor_hint()
+	playing = config.autoplay and config.mode != ProceduralAnimationConfig.Mode.NONE and not Engine.is_editor_hint()
 	_apply()
 
 
@@ -63,11 +66,11 @@ func toggle() -> void:
 		play()
 
 
-## Stops playback and returns to the rest pose. Play starts again from cycle 0.
+## Stops playback and returns to the rest pose. Play restarts from cycle 0.
 func reset() -> void:
 	playing = false
 	cycles = 0.0
-	transform = Transform3D.IDENTITY
+	transform = Transform2D.IDENTITY
 	state_changed.emit()
 
 
@@ -76,68 +79,108 @@ func set_mode(new_mode: ProceduralAnimationConfig.Mode) -> void:
 	_apply()
 
 
+## World position the path / approach motion is measured from (the rest pose).
+func get_rest_global_position() -> Vector2:
+	var parent := get_parent() as Node2D
+	return parent.global_position if parent != null else global_position
+
+
 func _apply() -> void:
 	if config != null:
 		transform = sample(cycles)
 
 
 ## Local offset transform at the given progress (in cycles).
-func sample(at_cycles: float) -> Transform3D:
-	var t := Transform3D.IDENTITY
+func sample(at_cycles: float) -> Transform2D:
 	if config == null:
-		return t
+		return Transform2D.IDENTITY
 	var c := at_cycles + config.phase_offset
 	var phase := c * TAU
 	var r := config.movement_range
-	var ax := config.axis.normalized() if config.axis.length() > 0.0001 else Vector3.UP
+	var ax := config.axis.normalized() if config.axis.length() > 0.0001 else Vector2.UP
+	var pos := Vector2.ZERO
+	var rot := 0.0
+	var scl := Vector2.ONE
 	match config.mode:
 		ProceduralAnimationConfig.Mode.BOB:
-			t.origin = _metres_to_local(ax * sin(phase) * r)
+			pos = _unscaled(ax * sin(phase) * r)
 		ProceduralAnimationConfig.Mode.SWAY:
-			t.basis = Basis(ax, deg_to_rad(sin(phase) * r))
+			rot = deg_to_rad(sin(phase) * r)
 		ProceduralAnimationConfig.Mode.SPIN:
-			t.basis = Basis(ax, deg_to_rad(fmod(c * r, 360.0)))
+			rot = deg_to_rad(fmod(c * r, 360.0))
 		ProceduralAnimationConfig.Mode.ORBIT:
-			var helper := Vector3.FORWARD if absf(ax.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT
-			var u := ax.cross(helper).normalized()
-			var v := ax.cross(u)
-			t.origin = _metres_to_local((u * (cos(phase) - 1.0) + v * sin(phase)) * r)
+			pos = _unscaled((ax * (cos(phase) - 1.0) + ax.orthogonal() * sin(phase)) * r)
 		ProceduralAnimationConfig.Mode.PULSE:
-			t.basis = Basis.from_scale(Vector3.ONE * maxf(0.01, 1.0 + sin(phase) * r))
+			scl = Vector2.ONE * maxf(0.01, 1.0 + sin(phase) * r)
+		ProceduralAnimationConfig.Mode.SQUASH:
+			var stretch := maxf(0.1, 1.0 + sin(phase) * r)
+			scl = Vector2(1.0 / stretch, stretch)
 		ProceduralAnimationConfig.Mode.HOP:
-			t.origin = _metres_to_local(ax * absf(sin(phase * 0.5)) * r)
+			pos = _unscaled(ax * absf(sin(phase * 0.5)) * r)
 		ProceduralAnimationConfig.Mode.WADDLE:
-			t.origin = _metres_to_local(ax * absf(sin(phase)) * r)
-			t.basis = Basis(Vector3.BACK, deg_to_rad(sin(phase) * r * 60.0))
+			pos = _unscaled(ax * absf(sin(phase)) * r)
+			rot = deg_to_rad(sin(phase) * r * 0.6)
 		ProceduralAnimationConfig.Mode.APPROACH:
-			# Smooth 0 -> 1 -> 0 over one cycle.
-			var amount := (0.5 - 0.5 * cos(phase)) * r
-			t.origin = _approach_direction(ax) * amount
-	return t
+			pos = _world_to_local(_approach_direction(ax) * (0.5 - 0.5 * cos(phase)) * r)
+		ProceduralAnimationConfig.Mode.PATH:
+			return _sample_path(c, r)
+	return Transform2D(rot, scl, 0.0, pos)
 
 
-## Converts an offset given in metres (in the parent's rotated frame) into the
-## parent's local space, cancelling the parent's own scale. This keeps
-## "movement range" in real metres even after the object is scaled.
-func _metres_to_local(offset: Vector3) -> Vector3:
-	var parent := get_parent() as Node3D
+func _sample_path(c: float, path_scale: float) -> Transform2D:
+	var pts := config.path_points
+	if pts.size() < 2:
+		return Transform2D.IDENTITY
+	if _curve == null or pts != _curve_points or config.path_closed != _curve_closed:
+		_curve = Curve2D.new()
+		_curve.bake_interval = 2.0
+		for p in pts:
+			_curve.add_point(p)
+		if config.path_closed:
+			_curve.add_point(pts[0])
+		_curve_points = pts.duplicate()
+		_curve_closed = config.path_closed
+	var length := _curve.get_baked_length()
+	if length <= 0.0:
+		return Transform2D.IDENTITY
+	var t := fposmod(c, 1.0)
+	var backwards := false
+	if not config.path_closed: # ping-pong
+		backwards = t > 0.5
+		t = 1.0 - absf(1.0 - 2.0 * t)
+	var d := t * length
+	var world_offset := (_curve.sample_baked(d) - pts[0]) * path_scale
+	var rot := 0.0
+	if config.path_orient:
+		var ahead := _curve.sample_baked(minf(d + 2.0, length)) - _curve.sample_baked(maxf(d - 2.0, 0.0))
+		if backwards:
+			ahead = -ahead
+		var parent := get_parent() as Node2D
+		rot = ahead.angle() - (parent.global_rotation if parent != null else 0.0)
+	return Transform2D(rot, Vector2.ONE, 0.0, _world_to_local(world_offset))
+
+
+## Offset in pixels (in the parent's rotated frame) -> parent-local units,
+## cancelling the parent's scale so ranges stay in real pixels.
+func _unscaled(offset: Vector2) -> Vector2:
+	var parent := get_parent() as Node2D
 	if parent == null:
 		return offset
 	var s := parent.scale
-	return Vector3(
-		offset.x / s.x if absf(s.x) > 0.0001 else 0.0,
-		offset.y / s.y if absf(s.y) > 0.0001 else 0.0,
-		offset.z / s.z if absf(s.z) > 0.0001 else 0.0)
+	return Vector2(offset.x / s.x if absf(s.x) > 0.0001 else 0.0, offset.y / s.y if absf(s.y) > 0.0001 else 0.0)
 
 
-## Unit direction toward the target on the ground plane, in parent-local space
-## (one local unit along it = one metre in the world).
-func _approach_direction(fallback_axis: Vector3) -> Vector3:
-	var parent := get_parent() as Node3D
+## World-oriented offset in pixels -> parent-local offset.
+func _world_to_local(world_offset: Vector2) -> Vector2:
+	var parent := get_parent() as Node2D
+	if parent == null or not is_inside_tree():
+		return world_offset
+	return parent.global_transform.affine_inverse().basis_xform(world_offset)
+
+
+func _approach_direction(fallback_axis: Vector2) -> Vector2:
+	var parent := get_parent() as Node2D
 	if target == null or parent == null or not is_inside_tree() or not target.is_inside_tree():
-		return _metres_to_local(fallback_axis)
+		return parent.global_transform.basis_xform(fallback_axis).normalized() if parent != null and is_inside_tree() else fallback_axis
 	var to_target := target.global_position - parent.global_position
-	to_target.y = 0.0
-	if to_target.length() < 0.001:
-		return Vector3.ZERO
-	return parent.global_basis.inverse() * to_target.normalized()
+	return to_target.normalized() if to_target.length() > 0.001 else Vector2.ZERO

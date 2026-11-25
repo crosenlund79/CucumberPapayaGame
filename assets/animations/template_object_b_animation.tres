@@ -4,11 +4,8 @@
 
 [resource]
 script = ExtResource("1_cfg")
-mode = 1
-speed = 0.5
-movement_range = 0.15
-axis = Vector3(0, 1, 0)
-loop = true
-cycles_when_not_looping = 1
-phase_offset = 0.0
-autoplay = true
+mode = 10
+speed = 0.25
+movement_range = 1.0
+path_points = PackedVector2Array(0, 0, 70, -60, 140, 0, 70, 60)
+path_closed = true
